@@ -49,6 +49,7 @@ Enum em `main.py` com os valores possíveis por CPF:
 
 - **`time.sleep(2)` por CPF** — intencional para não estourar rate limit da API V8
 - **Processamento sequencial** — não paralelizar; risco de bloqueio pela API
+- **Retentativas e Resiliência** — implementado retry nativo (`urllib3`) para erros 5xx, e retry no nível de aplicação (até 25 vezes) para falhas de rede (`Timeout`, etc.), dada a instabilidade da API.
 - **Pausa às 5h** — encerra limpo com `return` em vez de loop infinito
 - **Distribuição via PyInstaller** — `logger_setup.py` detecta `sys.frozen` para salvar logs junto ao `.exe`
 - **Senha em `.env`** — aceitável dado o contexto de uso interno/operacional

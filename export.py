@@ -207,6 +207,9 @@ def cleanup_file(filepath: str) -> None:
         if os.path.exists(filepath):
             os.remove(filepath)
             print("Arquivo temporário removido.")
+        if os.path.exists('contador.txt'):
+            os.remove('contador.txt')
+            print("Contador resetado.")
     except Exception as e:
         print(f"Erro ao remover arquivo: {e}")
 

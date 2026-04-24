@@ -101,7 +101,13 @@ def _handle_consult_error(response: requests.Response, cpf: str) -> Tuple[Any, A
     error_reason is only set when status is FALHA_CONSULTA.
     """
     try:
-        body = response.json()
+        raw = response.text
+        try:
+            body = response.json()
+        except ValueError:
+            # Resposta não-JSON (ex: timeout de proxy/load balancer)
+            logging.warning(f"CPF {cpf}: resposta não-JSON (status {response.status_code}): {raw[:200]}")
+            return ConsultStatus.RETRY, None, False, None
         error_msg = str(body.get('error', ''))
 
         if response.status_code == 400:
@@ -110,6 +116,9 @@ def _handle_consult_error(response: requests.Response, cpf: str) -> Tuple[Any, A
             if "não possui autorização" in detail or "Instituição Fiduciária" in detail:
                 logging.info(f"CPF {cpf}: Não autorizado (400)")
                 return ConsultStatus.NAO_AUTORIZADO, None, True, None
+            if "não possui saldo disponível" in detail.lower():
+                logging.info(f"CPF {cpf}: Sem saldo (400)")
+                return ConsultStatus.SEM_SALDO, None, True, None
             return None, None, False, f"HTTP 400: {detail or error_msg}"
 
         if response.status_code == 500:
@@ -153,8 +162,9 @@ def _handle_consult_error(response: requests.Response, cpf: str) -> Tuple[Any, A
         logging.error(f"Falha consulta CPF {cpf}. Status: {response.status_code}. Response: {response.text}")
         return None, None, False, reason
 
-    except Exception:
-        return None, None, False, "Erro ao processar resposta da API"
+    except Exception as e:
+        logging.error(f"Exceção ao processar resposta da API para CPF {cpf}: {e} | body bruto: {raw[:500]}", exc_info=True)
+        return None, None, False, f"Erro ao processar resposta da API: {e}"
 
 
 def consult_balance(
@@ -192,20 +202,30 @@ def consult_balance(
             response.raise_for_status()
 
             balance_data = response.json()
-            # If POST returns None/Empty, try GET
             if balance_data is None:
-                response = session.get(
-                    URL_CONSULT_BALANCE,
-                    headers=headers,
-                    params=params_consult_get,
-                    timeout=TIMEOUT_SECONDS
-                )
-                response.raise_for_status()
-                balance_data = response.json()
+                # Polling loop for async result
+                poll_retries = 0
+                while poll_retries < 15:
+                    response = session.get(
+                        URL_CONSULT_BALANCE,
+                        headers=headers,
+                        params=params_consult_get,
+                        timeout=TIMEOUT_SECONDS
+                    )
+                    response.raise_for_status()
+                    balance_data = response.json()
+                    if balance_data and balance_data.get('data'):
+                        break
+                    time.sleep(2)
+                    poll_retries += 1
+
+            if not balance_data:
+                return None, None, False, "Resposta nula ou vazia após polling"
 
             data_list = balance_data.get('data', [])
             if not data_list:
-                return None, None, False, "Resposta sem dados (data vazio)"
+                # Even after polling, data is empty
+                return None, None, False, "Resposta sem dados (data vazio) após polling"
 
             first_record = data_list[0]
             balance_periods = first_record.get('periods', [])
@@ -245,9 +265,11 @@ def consult_balance(
                     return result, b_id, True, None
                 return None, None, False, reason
 
-            print("Falha ao consultar o BALANÇO. Sem resposta.")
-            logging.error(f"Falha consulta BALANÇO CPF {cpf}. Sem resposta.")
-            return None, None, False, f"Sem resposta da API: {e}"
+            print(f"Falha ao consultar o BALANÇO. Sem resposta. Tentativa {retries + 1}/{MAX_RETRIES}")
+            logging.warning(f"Falha consulta BALANÇO CPF {cpf}. Sem resposta. Tentativa {retries + 1}/{MAX_RETRIES}. Erro: {e}")
+            time.sleep(2)
+            retries += 1
+            continue
 
         except Exception as e:
             print(f'Ocorreu um erro ao fazer a solicitação de PARCELAS: {e}')
@@ -341,32 +363,60 @@ def simulation(
         "balanceId": balance_id
     }
 
-    try:
-        response = session.post(
-            URL_SIMULATION,
-            headers=headers,
-            json=data_simulation,
-            timeout=TIMEOUT_SECONDS
-        )
-        # response.raise_for_status() # Original code had this, but also catch block
+    retries = 0
+    while retries < MAX_RETRIES:
+        try:
+            response = session.post(
+                URL_SIMULATION,
+                headers=headers,
+                json=data_simulation,
+                timeout=TIMEOUT_SECONDS
+            )
 
-        if response.status_code >= 400:
-             # Force raise to catch block used below
-             response.raise_for_status()
+            if response.status_code >= 400:
+                try:
+                    body = response.json()
+                except ValueError:
+                    logging.warning(f"CPF {cpf}: resposta não-JSON na SIMULAÇÃO (status {response.status_code}): {response.text[:200]}")
+                    time.sleep(2)
+                    retries += 1
+                    continue
+                response.raise_for_status()
 
-        simulation_data = response.json()
-        available_balance = simulation_data.get('availableBalance')
-        
-        if available_balance is not None:
-            print(f'Saldo disponível para o CPF: {cpf}', available_balance)
-            logging.info(f"Saldo disponível CPF {cpf}: {available_balance}")
-            return available_balance
-        
-        print(f'Simulação não retornou saldo disponível para o CPF: {cpf}')
+            simulation_data = response.json()
+            available_balance = simulation_data.get('availableBalance')
+            
+            if available_balance is not None:
+                print(f'Saldo disponível para o CPF: {cpf}', available_balance)
+                logging.info(f"Saldo disponível CPF {cpf}: {available_balance}")
+                return available_balance
+            
+            print(f'Simulação não retornou saldo disponível para o CPF: {cpf}')
+            return None
 
-    except requests.RequestException as e:
-        print(f'Erro ao fazer a solicitação de SALDO: {e}')
-        logging.error(f"Erro solicitação SALDO CPF {cpf}: {e}")
+        except requests.RequestException as e:
+            if getattr(e.response, 'status_code', None) == 429:
+                print("Limite de requisições excedido na simulação, aguardando...")
+                time.sleep(2)
+                retries += 1
+                continue
+            
+            if getattr(e.response, 'status_code', 0) >= 500:
+                print(f"Erro no servidor durante simulação: {e.response.status_code}. Tentando novamente...")
+                time.sleep(2)
+                retries += 1
+                continue
+
+            if getattr(e, 'response', None) is None:
+                print(f"Falha ao simular SALDO. Sem resposta. Tentativa {retries + 1}/{MAX_RETRIES}")
+                logging.warning(f"Erro solicitação SALDO CPF {cpf}. Sem resposta. Tentativa {retries + 1}/{MAX_RETRIES}. Erro: {e}")
+                time.sleep(2)
+                retries += 1
+                continue
+
+            print(f'Erro fatal ao fazer a solicitação de SALDO: {e}')
+            logging.error(f"Erro fatal solicitação SALDO CPF {cpf}: {e}")
+            break
 
     return None
 
@@ -397,6 +447,10 @@ def process_row(
         return cpf, balance.value, None
 
     if success and balance not in (ConsultStatus.SEM_SALDO, None):
+        if len(balance) < 2:
+            logging.info(f"CPF {cpf}: Sem saldo (menos de 2 parcelas disponíveis)")
+            return cpf, ConsultStatus.SEM_SALDO.value, None
+            
         sim = simulation(session, token, balance, cpf, balance_id, fees_id)
         if sim is not None:
             return cpf, sim, None
@@ -462,6 +516,18 @@ def save_counter(counter: int):
             f.write(str(counter))
     except Exception as e:
         print(f"Erro ao salvar contador: {e}")
+
+
+def load_results() -> Optional[Dict]:
+    """Loads the current result payload from JSON file."""
+    try:
+        if os.path.exists(RESULT_JSON_FILE):
+            with open(RESULT_JSON_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Erro ao carregar resultados JSON: {e}")
+        logging.error(f"Erro ao carregar resultados JSON: {e}")
+    return None
 
 
 def save_results(payload: Dict):
@@ -547,23 +613,34 @@ def main():
         total_rows = sheet.max_row - 1  # descontando cabeçalho
 
         inicio = datetime.now()
-        payload = {
-            "meta": {
-                "tabela": base_files[0],
-                "tabela_simulacao": tabela["nome"],
-                "operador": user_info.get('name'),
-                "inicio": inicio.strftime("%Y-%m-%d %H:%M:%S"),
-                "fim": None,
-                "total_cpfs": total_rows,
-                "processados": contador,
-                "com_saldo": 0,
-                "sem_saldo": 0,
-                "nao_autorizado": 0,
-                "cpf_invalido": 0,
-                "falha_consulta": 0,
-            },
-            "cpfs": {}
-        }
+        
+        existing_payload = load_results() if contador > 0 else None
+        
+        if not existing_payload and contador > 0:
+            print("Histórico (result.json) não encontrado. Reiniciando do começo (contador = 0).")
+            contador = 0
+            save_counter(0)
+        
+        if existing_payload and "meta" in existing_payload and "cpfs" in existing_payload:
+            payload = existing_payload
+        else:
+            payload = {
+                "meta": {
+                    "tabela": base_files[0],
+                    "tabela_simulacao": tabela["nome"],
+                    "operador": user_info.get('name'),
+                    "inicio": inicio.strftime("%Y-%m-%d %H:%M:%S"),
+                    "fim": None,
+                    "total_cpfs": total_rows,
+                    "processados": contador,
+                    "com_saldo": 0,
+                    "sem_saldo": 0,
+                    "nao_autorizado": 0,
+                    "cpf_invalido": 0,
+                    "falha_consulta": 0,
+                },
+                "cpfs": {}
+            }
         save_results(payload)
 
         session = create_session()
