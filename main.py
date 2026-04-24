@@ -237,7 +237,7 @@ def consult_balance(
                 return None, None, False, "balance_periods inválido na resposta"
 
             new_balance_periods = [
-                {"totalAmount": amount['amount'], "dueDate": amount['dueDate']}
+                {"totalAmount": amount['amount'], "amount": amount['amount'], "dueDate": amount['dueDate']}
                 for amount in balance_periods if isinstance(amount, dict)
             ]
             return new_balance_periods, balance_id, True, None
@@ -376,6 +376,9 @@ def simulation(
             if response.status_code >= 400:
                 try:
                     body = response.json()
+                    error_msg = body.get('error') or body.get('detail') or body.get('message')
+                    if error_msg:
+                        logging.error(f"CPF {cpf}: Erro na SIMULAÇÃO ({response.status_code}): {error_msg}")
                 except ValueError:
                     logging.warning(f"CPF {cpf}: resposta não-JSON na SIMULAÇÃO (status {response.status_code}): {response.text[:200]}")
                     time.sleep(2)
@@ -402,7 +405,13 @@ def simulation(
                 continue
             
             if getattr(e.response, 'status_code', 0) >= 500:
-                print(f"Erro no servidor durante simulação: {e.response.status_code}. Tentando novamente...")
+                try:
+                    error_body = e.response.json()
+                    detail = error_body.get('error') or error_body.get('detail') or error_body.get('message') or ""
+                    print(f"Erro no servidor durante simulação: {e.response.status_code}. {detail}. Tentando novamente...")
+                except Exception:
+                    print(f"Erro no servidor durante simulação: {e.response.status_code}. Tentando novamente...")
+                
                 time.sleep(2)
                 retries += 1
                 continue
@@ -581,12 +590,19 @@ def main():
         return
 
     if not os.path.exists(BASE_DIR):
-        print(f"A pasta '{BASE_DIR}' não existe.")
+        os.makedirs(BASE_DIR)
+        print(f"A pasta '{BASE_DIR}' foi criada. Coloque o arquivo XLSX dentro dela e execute novamente.")
+        input('Pressione ENTER para sair.')
         return
 
-    base_files = os.listdir(BASE_DIR)
+    base_files = [f for f in os.listdir(BASE_DIR) if not f.startswith('~$')]
+    if len(base_files) == 0:
+        print(f"A pasta '{BASE_DIR}' está vazia. Coloque o arquivo XLSX dentro dela e execute novamente.")
+        input('Pressione ENTER para sair.')
+        return
     if len(base_files) != 1:
-        print(f"A pasta '{BASE_DIR}' deve conter exatamente um arquivo XLSX.")
+        print(f"A pasta '{BASE_DIR}' deve conter exatamente um arquivo XLSX. Foram encontrados {len(base_files)} arquivos.")
+        input('Pressione ENTER para sair.')
         return
 
     arquivo_xlsx = os.path.join(BASE_DIR, base_files[0])

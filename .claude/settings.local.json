@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pyinstaller --onefile --icon=icon/my_icon.ico --name=main main.py)",
+      "Bash(pyinstaller --onefile --icon=icon/my_icon.ico --name=export export.py)"
+    ]
+  }
+}

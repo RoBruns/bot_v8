@@ -226,6 +226,8 @@ def main():
     else:
         print("Processo finalizado sem exportação.")
 
+    input("\nPressione ENTER para sair.")
+
 
 if __name__ == '__main__':
     main()
