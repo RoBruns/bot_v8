@@ -273,44 +273,38 @@ def select_tabela() -> Dict:
     opcoes = list(TABELAS.values())
     idx = 0
 
-    # Códigos de tecla especial do msvcrt no Windows
     KEY_UP    = b'H'
     KEY_DOWN  = b'P'
     KEY_ENTER = b'\r'
 
-    # Cores ANSI
     RESET    = '\033[0m'
     SELECTED = '\033[1;97;45m'  # negrito, branco, fundo roxo
     NORMAL   = '\033[2;37m'     # cinza claro
 
-    # Habilita cores ANSI no terminal Windows
+    # Habilita sequências ANSI no terminal Windows
     os.system('')
 
-    def _render(current: int):
-        # Sobe N linhas e redesenha
-        sys.stdout.write(f'\033[{len(opcoes) + 1}A')
+    # Título + linha em branco + N opções = N+2 linhas no total
+    TOTAL_LINES = len(opcoes) + 2
+
+    def _render(current: int, first: bool = False):
+        if not first:
+            # Sobe exatamente o número de linhas que foram impressas
+            sys.stdout.write(f'\033[{TOTAL_LINES}A')
         sys.stdout.write('\033[J')
-        print(' Escolha a tabela de simulação:\n')
+        sys.stdout.write(' Escolha a tabela de simulação:\n\n')
         for i, op in enumerate(opcoes):
             if i == current:
-                print(f'  {SELECTED}  ▶  {op["nome"]}  {RESET}')
+                sys.stdout.write(f'  {SELECTED}  ▶  {op["nome"]}  {RESET}\n')
             else:
-                print(f'{NORMAL}     {op["nome"]}  {RESET}')
+                sys.stdout.write(f'{NORMAL}     {op["nome"]}  {RESET}\n')
         sys.stdout.flush()
 
-    # Primeiro render (sem subir — ainda não há linhas anteriores)
-    print(' Escolha a tabela de simulação:\n')
-    for i, op in enumerate(opcoes):
-        if i == 0:
-            print(f'  {SELECTED}  ▶  {op["nome"]}  {RESET}')
-        else:
-            print(f'{NORMAL}     {op["nome"]}  {RESET}')
-    sys.stdout.flush()
+    _render(idx, first=True)
 
     while True:
         key = msvcrt.getch()
 
-        # Teclas especiais chegam como dois bytes: b'\xe0' + código
         if key == b'\xe0':
             key = msvcrt.getch()
             if key == KEY_UP:
@@ -321,7 +315,8 @@ def select_tabela() -> Dict:
                 _render(idx)
         elif key == KEY_ENTER:
             tabela = opcoes[idx]
-            print(f'\n  Tabela selecionada: {tabela["nome"]}\n')
+            sys.stdout.write(f'\n  Tabela selecionada: {tabela["nome"]}\n\n')
+            sys.stdout.flush()
             logging.info(f"Tabela selecionada: {tabela['nome']} (ID: {tabela['id']})")
             return tabela
 
