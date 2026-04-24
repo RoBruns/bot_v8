@@ -1,5 +1,19 @@
 # BOT_PRINCIPAL — Contexto do Projeto
 
+## Branches
+
+| Branch | Propósito | Como rodar |
+|---|---|---|
+| `master` | Bot original de terminal — backup estável | `python main.py` |
+| `ui` | App desktop PyQt6 — versão nova com interface gráfica | `python app.py` |
+
+- As duas branches são **independentes** — nunca fazer merge de `ui` em `master`
+- `master` é o backup; só recebe correções críticas no bot original
+- Todo desenvolvimento novo acontece na branch `ui`
+- Repositório: `https://github.com/RoBruns/bot_v8`
+
+---
+
 ## O que é
 
 Bot de consulta de saldo FGTS. Lê uma planilha XLSX com CPFs, consulta o saldo de cada um via API do sistema V8, salva os resultados em JSON e permite exportação para Excel.
