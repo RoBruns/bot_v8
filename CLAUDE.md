@@ -64,3 +64,14 @@ BOT_PRINCIPAL/
 ├── contador.txt    # Progresso atual (zerado ao concluir)
 └── .env            # Credenciais persistidas
 ```
+
+## Branch `ui` — App Desktop
+
+- Entry point: `app.py`
+- Rodar: `python app.py`
+- Dependências novas: PyQt6
+- SQLite gerado em `bot.db` automaticamente
+- Histórico de exportações em `historico/`
+- Arquitetura: `core/` (API pura) + `db/` (SQLite) + `ui/` (PyQt6)
+- Workers rodam em QThreads — worker pool que consome fila de CPFs em ordem
+- `main.py` e `export.py` originais permanecem intocados na branch `master`
