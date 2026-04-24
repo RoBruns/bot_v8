@@ -1,0 +1,28 @@
+# Ambiente virtual
+venv/
+
+# Credenciais e dados sensíveis
+.env
+contador.txt
+
+# Dados de entrada/saída (não versionar bases e resultados)
+base/
+result_json/
+output/
+logs/
+
+# Artefatos PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# VS Code
+.vscode/
+
+# Temporários
+tempCodeRunnerFile.py
