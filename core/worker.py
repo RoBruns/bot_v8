@@ -32,31 +32,47 @@ class CpfWorker(QThread):
         self.session_id = session_id
 
     def run(self):
+        log = logging.getLogger(f"worker.{self.username}")
+        log.info(f"[{self.username}] Iniciando — obtendo token...")
+
         token = get_token(self.username, self.password)
         if not token:
-            logging.error(f"Worker {self.worker_id}: falha ao obter token.")
+            log.error(f"[{self.username}] Falha ao obter token. Worker encerrado.")
             self.finished_worker.emit(self.worker_id)
             return
 
+        log.info(f"[{self.username}] Token obtido com sucesso.")
         http_session = create_session()
+        processed = 0
 
         while True:
             cpf = self.queue.next_cpf()
             if cpf is None:
                 break
 
+            log.info(f"[{self.username}] Consultando CPF: {cpf}")
             cpf_str, result, reason = process_cpf(cpf, token, http_session, self.fees_id)
 
             if result == ConsultStatus.TOKEN_EXPIRADO:
+                log.warning(f"[{self.username}] Token expirado. Renovando...")
                 token = get_token(self.username, self.password)
                 if not token:
-                    logging.error(f"Worker {self.worker_id}: falha ao renovar token.")
+                    log.error(f"[{self.username}] Falha ao renovar token. Worker encerrado.")
                     break
+                log.info(f"[{self.username}] Token renovado com sucesso.")
                 self.token_renewed.emit(self.worker_id)
                 cpf_str, result, reason = process_cpf(cpf, token, http_session, self.fees_id)
 
             valor_str = str(result) if not isinstance(result, float) else f"{result:.2f}"
+
+            if isinstance(result, float):
+                log.info(f"[{self.username}] CPF {cpf_str} → COM SALDO: R$ {valor_str}")
+            else:
+                log.info(f"[{self.username}] CPF {cpf_str} → {valor_str}" + (f" ({reason})" if reason else ""))
+
             history_repo.add_result(self.session_id, cpf_str, valor_str, reason)
             self.result_ready.emit(cpf_str, valor_str, reason)
+            processed += 1
 
+        log.info(f"[{self.username}] Worker finalizado. CPFs processados nesta sessão: {processed}")
         self.finished_worker.emit(self.worker_id)

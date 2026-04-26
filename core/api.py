@@ -76,6 +76,11 @@ def _handle_consult_error(response: requests.Response, cpf: str) -> Tuple[Any, A
                 return ConsultStatus.NAO_AUTORIZADO, None, True, None
             if "não possui saldo disponível" in detail.lower():
                 return ConsultStatus.SEM_SALDO, None, True, None
+            # Erros transitórios — a API pede para tentar novamente
+            _RETRY_400 = ("tente novamente", "try again", "serviço indisponível", "timeout")
+            if any(x in detail.lower() for x in _RETRY_400):
+                logging.warning(f"CPF {cpf}: HTTP 400 transitório, vai retenciar — detail: {detail}")
+                return ConsultStatus.RETRY, None, False, None
             return None, None, False, f"HTTP 400: {detail or error_msg}"
 
         if response.status_code == 500:
@@ -160,6 +165,7 @@ def consult_balance(
                     return ConsultStatus.TOKEN_EXPIRADO, None, False, None
                 result, b_id, finished, reason = _handle_consult_error(e.response, cpf)
                 if result == ConsultStatus.RETRY:
+                    logging.warning(f"CPF {cpf}: tentativa {retries + 1}/{MAX_RETRIES} — aguardando para retentar...")
                     time.sleep(0.4)
                     retries += 1
                     continue
