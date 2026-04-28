@@ -25,6 +25,7 @@ COR_COM_SALDO      = 'C6EFCE'  # verde claro
 COR_SEM_SALDO      = 'FCE4D6'  # laranja claro
 COR_NAO_AUTORIZADO = 'FFEB9C'  # amarelo claro
 COR_FALHA          = 'FFC7CE'  # vermelho claro
+COR_OPERACAO_EM_ANDAMENTO = 'B4C6E7'  # azul claro
 COR_NEUTRO         = 'FFFFFF'  # branco (CPF inválido e outros)
 
 # Resumo
@@ -64,6 +65,8 @@ def _row_color_for(valor) -> str:
         return COR_SEM_SALDO
     if v == 'NAO AUTORIZADO':
         return COR_NAO_AUTORIZADO
+    if v == 'OPERAÇÃO EM ANDAMENTO':
+        return COR_OPERACAO_EM_ANDAMENTO
     if v == 'FALHA CONSULTA':
         return COR_FALHA
     return COR_NEUTRO
@@ -103,6 +106,7 @@ def export_to_excel(payload: Dict) -> None:
         ("Sem saldo",               meta.get("sem_saldo", 0)),
         ("Não autorizado",          meta.get("nao_autorizado", 0)),
         ("CPF inválido",            meta.get("cpf_invalido", 0)),
+        ("Operação em andamento",   meta.get("operacao_em_andamento", 0)),
         ("Falha de consulta",       meta.get("falha_consulta", 0)),
     ]
 
