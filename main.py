@@ -59,6 +59,7 @@ class ConsultStatus(str, Enum):
     FALHA_CONSULTA = "FALHA CONSULTA"
     RETRY = "RETRY"
     TOKEN_EXPIRADO = "TOKEN EXPIRADO"
+    OPERACAO_EM_ANDAMENTO = "OPERAÇÃO EM ANDAMENTO"
 
 
 def get_token(username: str, password: str) -> Optional[str]:
@@ -112,13 +113,26 @@ def _handle_consult_error(response: requests.Response, cpf: str) -> Tuple[Any, A
 
         if response.status_code == 400:
             detail = body.get('detail', '')
-            print(f"Erro 400: {detail}")
-            if "não possui autorização" in detail or "Instituição Fiduciária" in detail:
-                logging.info(f"CPF {cpf}: Não autorizado (400)")
+            combined_msg = detail + " " + error_msg
+            print(f"Erro 400 para o CPF {cpf}: {combined_msg.strip()}")
+            
+            if "fiduciária em andamento" in combined_msg.lower() or "fiduciaria em andamento" in combined_msg.lower() or "fiduciaria em adamento" in combined_msg.lower():
+                logging.info(f"CPF {cpf}: Operação Fiduciária em andamento (400) - Detalhe: {combined_msg.strip()}")
+                return ConsultStatus.OPERACAO_EM_ANDAMENTO, None, True, None
+            if "não possui autorização" in combined_msg or "Fiduciária" in combined_msg:
+                logging.info(f"CPF {cpf}: Não autorizado (400) - Detalhe: {combined_msg.strip()}")
                 return ConsultStatus.NAO_AUTORIZADO, None, True, None
-            if "não possui saldo disponível" in detail.lower():
+            if "não possui saldo disponível" in combined_msg.lower() or "saldo insuficiente" in combined_msg.lower():
                 logging.info(f"CPF {cpf}: Sem saldo (400)")
                 return ConsultStatus.SEM_SALDO, None, True, None
+            if "Número de documento inválido" in combined_msg or "CPF inválido" in combined_msg:
+                logging.warning(f"CPF inválido na planilha [{cpf}]: {combined_msg.strip()}")
+                return ConsultStatus.CPF_INVALIDO, None, True, None
+            if "Tente novamente" in combined_msg:
+                logging.warning(f"Erro temporário da API para o CPF {cpf}: {combined_msg.strip()}")
+                return ConsultStatus.RETRY, None, False, None
+            
+            logging.error(f"Falha de consulta (400) para CPF {cpf}: {combined_msg.strip()}")
             return None, None, False, f"HTTP 400: {detail or error_msg}"
 
         if response.status_code == 500:
@@ -653,6 +667,7 @@ def main():
                     "sem_saldo": 0,
                     "nao_autorizado": 0,
                     "cpf_invalido": 0,
+                    "operacao_em_andamento": 0,
                     "falha_consulta": 0,
                 },
                 "cpfs": {}
@@ -704,6 +719,8 @@ def main():
                 meta["nao_autorizado"] += 1
             elif result_value == ConsultStatus.CPF_INVALIDO.value:
                 meta["cpf_invalido"] += 1
+            elif result_value == ConsultStatus.OPERACAO_EM_ANDAMENTO.value:
+                meta["operacao_em_andamento"] = meta.get("operacao_em_andamento", 0) + 1
             else:
                 meta["falha_consulta"] += 1
 
