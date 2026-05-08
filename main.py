@@ -455,7 +455,15 @@ def process_row(
     error_reason is only set when result is FALHA_CONSULTA.
     May return ConsultStatus.TOKEN_EXPIRADO to signal renewal.
     """
-    cpf = str(row[0])
+    cpf = str(row[0]).strip()
+    
+    # Remove ".0" caso o Excel tenha lido como float
+    if cpf.endswith('.0'):
+        cpf = cpf[:-2]
+        
+    # Completa com zeros à esquerda se for menor que 11
+    if len(cpf) < 11:
+        cpf = cpf.zfill(11)
 
     print(f"Consultando CPF:{cpf} com '{PROVIDER_BMS}'...")
     logging.info(f"Consultando CPF: {cpf}")
